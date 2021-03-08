@@ -6,10 +6,13 @@
 
 package gobtc
 
-import(
-	"math/big"
+import (
 	"crypto/rand"
+	"crypto/ripemd160"
+	"crypto/sha256"
 	"encoding/hex"
+	"math/big"
+	"github.com/btcsuite/btcutil/base58"
 )
 
 /******************************************************************************/
@@ -62,14 +65,15 @@ func newPrivateKey() (*PrivateKey){
 	n,_ = n.SetString(hexEncoder(randomData()), 16)
 	key := &PrivateKey{
 		D: n,
-		H: hexEncoder(randomData()),
+		H: hexEncoder(n.Bytes()),
 	}	
 	return key
 }
 
 //NewPublicKey generate a public key from a private bitcoin key
-func newPublicKey(k *big.Int) (*PublicKey){
-	K := secp256k1.ScalarBaseMult(k)
+func newPublicKey(k string) (*PublicKey){
+	Q, _ := new(big.Int).SetString(k, 16)
+	K := secp256k1.ScalarBaseMult(Q)
 	publicKey := PublicKey{
 		Point: K,
 		H: "04"+K.X.Text(16)+K.Y.Text(16),
@@ -80,12 +84,32 @@ func newPublicKey(k *big.Int) (*PublicKey){
 // GenerateKeys creates a pair of keys for Bitcoin
 func GenerateKeys() (*KeyPair){
 	privateKey := newPrivateKey()
-	publicKey := newPublicKey(privateKey.D)
+	publicKey := newPublicKey(privateKey.H)
 	keys := &KeyPair{
 		PrivateKey: *privateKey,
 		PublicKey: *publicKey,
 	}
 	return keys
+}
+
+
+// PrivateToWif converts private key into wif format
+func PrivateToWif(key string) string{
+	extendedKey := "ef"+key
+	checksum := sha256Hashing(sha256Hashing(extendedKey))
+	checksum = checksum[0:8]
+	extendedKey = extendedKey+checksum
+	wif := base58Encoder(extendedKey)
+	return wif
+}
+
+// PublicToAddress generates a bitcoin address from a public key
+func PublicToAddress(K string) string{
+	hash160 := ripemd160Hashing(sha256Hashing(K))
+	checksum := sha256Hashing(sha256Hashing("6f"+hash160))
+	checksum = checksum[0:8]
+	address := base58Encoder("6f"+hash160+checksum)
+	return address
 }
 
 // GetPrivateKey retrieves the private key
@@ -99,10 +123,44 @@ func (K PublicKey) GetPublicKey() *PublicKey{
 }
 
 /******************************************************************************/
-/* Helpers */
+/* Encoders */
 /******************************************************************************/
 
 func hexEncoder(buffer []byte) string{
 	hexKey := hex.EncodeToString(buffer)
 	return hexKey
+}
+
+func hexDecoder(data string) []byte{
+	src,err := hex.DecodeString(data)
+	if err != nil {
+		panic ("Invalid hex string")
+	}	
+	return src
+}
+
+func base58Encoder(data string) string{
+	src,err := hex.DecodeString(data)
+	if err != nil {
+		panic ("Invalid hex string")
+	}	
+	bytes := []byte(src)
+	encoded := base58.Encode(bytes)
+	return encoded
+}
+
+func sha256Hashing(data string) string{
+	src := hexDecoder(data)
+	hash := sha256.New()
+	hash.Write(src)
+	md := hash.Sum(nil)
+	return hex.EncodeToString(md)
+}
+
+func ripemd160Hashing(data string) string{
+	src := hexDecoder(data)
+	sum := ripemd160.New()
+	sum.Write(src)
+	hashBytes := sum.Sum(nil)
+	return hex.EncodeToString(hashBytes[:])
 }
